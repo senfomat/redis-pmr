@@ -1,0 +1,84 @@
+[project]
+name = "redis-pmr"
+version = "0.1.0"
+description = "Redis Poor-mans-replication"
+readme = "README.md"
+authors = [
+    { name = "Christian Frömmel", email = "c.froemmel@systemconcept.de" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "click>=8.5.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "redis[hiredis]>=8.1.0",
+]
+
+[project.scripts]
+redis-pmr = "redis_pmr.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.ruff.format]
+preview = true
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+
+[tool.ruff.lint]
+preview = true
+select = ["ALL"]
+
+ignore = [
+"blind-except",
+"C90",
+"missing-trailing-comma",
+"missing-copyright-notice",
+"D",
+"line-too-long",
+"commented-out-code",
+"magic-value-comparison",
+"too-many-nested-blocks",
+"too-many-branches",
+"too-many-locals",
+"too-many-statements",
+"print",
+"hardcoded-bind-all-interfaces",
+"typing-only-first-party-import",
+"typing-only-third-party-import",
+"typing-only-standard-library-import",
+"no-self-use",
+"unused-async",
+"call-datetime-now-without-tzinfo",
+"call-date-today",
+]
+
+# Avoid trying to fix flake8-bugbear (`B`) violations.
+unfixable = ["B"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["unused-import", "undefined-local-with-import-star"]
+"tests/**" = [
+    "D",
+    "DOC",
+    "assert",
+    "async-function-with-timeout",
+    "suspicious-subprocess-import",
+    "subprocess-without-shell-equals-true",
+    "hardcoded-password-string",
+    "hardcoded-password-func-arg",
+]

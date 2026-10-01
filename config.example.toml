@@ -1,0 +1,94 @@
+# redis-pmr configuration – use the identical file on every node.
+#
+# Every value can be overridden by environment variables with the prefix
+# PMR_ and "__" as nesting separator, e.g. PMR_LOCAL__URL or PMR_NODE.
+
+# Name of the node this process runs on. Usually left out: the local node is
+# detected by comparing the run_id of the local Redis with every node.
+# node = "node-a"
+
+[auth]
+# Default credentials for every server (local and nodes), for requirepass
+# (password only) or an ACL user (username + password). Any entry below can
+# override them with its own username/password; credentials written into a
+# URL take precedence over both and are never mixed with them.
+#
+# Keep the password out of this shared file by setting it per host via
+# PMR_AUTH__PASSWORD (e.g. in a systemd EnvironmentFile). No URL encoding of
+# special characters is needed here, unlike in URLs.
+# username = "pmr"
+# password = "set-via-PMR_AUTH__PASSWORD"
+
+[local]
+# The Redis server on this host; its keyspace notifications are replicated.
+#
+# Connected via Unix domain socket: no TCP overhead, no network exposure,
+# and the same path works on every host, so this file stays identical.
+# Requires in redis.conf:
+#   unixsocket /run/redis/redis-server.sock
+#   unixsocketperm 770      # and add the redis-pmr user to the redis group
+#
+# The db query parameter selects which database is watched.
+url = "unix:///run/redis/redis-server.sock?db=0"
+# TCP alternative: url = "redis://localhost:6379/0"
+# Credentials of the local server, if they differ from [auth]
+# (environment: PMR_LOCAL__USERNAME, PMR_LOCAL__PASSWORD).
+# username = "pmr"
+# password = "..."
+# Add missing notify-keyspace-events flags via CONFIG SET (existing flags are
+# kept). If false, redis-pmr only checks and refuses to start.
+manage_notify_config = true
+
+[replication]
+# Glob patterns of keys to replicate.
+patterns = ["session:*", "lock:*"]
+# Keys per DUMP/RESTORE pipeline.
+batch_size = 256
+# Distinct keys buffered per unreachable target before mutations are dropped
+# (a reconcile for that target runs once it is reachable again).
+max_pending_per_target = 100_000
+# Push all keys matching the patterns once after startup.
+reconcile_on_start = false
+# Push all keys matching the patterns after a reconnect to the local server,
+# because Pub/Sub events during the outage are lost.
+reconcile_on_reconnect = true
+scan_count = 1000
+# Seconds to wait for pending mutations on SIGTERM/SIGINT.
+shutdown_drain_timeout = 5.0
+# Seconds between stats log lines, 0 disables them.
+stats_interval = 60.0
+# DUMP/RESTORE ABSTTL and PEXPIRETIME require Redis 7.0.
+min_server_version = "7.0"
+
+[backoff]
+initial = 0.5
+maximum = 30.0
+factor = 2.0
+
+[connection]
+socket_timeout = 10.0
+connect_timeout = 5.0
+health_check_interval = 10.0
+keepalive_idle = 10
+keepalive_interval = 5
+keepalive_count = 3
+
+# All nodes of the mesh, reachable over the network. The local node may stay
+# in this list: it is recognized by its run_id (even though it is reached via
+# the Unix socket above) and never written to. Without own credentials, a
+# node uses those from [auth].
+
+[[nodes]]
+name = "node-a"
+url = "redis://node-a:6379/0"
+
+[[nodes]]
+name = "node-b"
+url = "redis://node-b:6379/0"
+
+[[nodes]]
+name = "node-c"
+# TLS, with credentials differing from [auth]
+url = "rediss://node-c:6380/0"
+# username = "pmr-c"
+# password = "..."
