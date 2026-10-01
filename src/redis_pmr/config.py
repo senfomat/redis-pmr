@@ -84,7 +84,7 @@ class Credentials(_Model):
     username: str | None = None
     password: SecretStr | None = None
 
-    def merged_with(self, fallback: Credentials) -> Credentials:
+    def merged_with(self, fallback: "Credentials") -> "Credentials":
         """Fill unset fields from *fallback*.
 
         Returns:
