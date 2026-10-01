@@ -128,9 +128,12 @@ reconnect. `INFO` is required anyway for the version checks (see
 | `notify-keyspace-events` ⊇ `Kg$lshzt` | `K` keyspace channel, `g` generic commands, `$ l s h z t` data types. Set automatically by default. |
 | Synchronized clocks (NTP) | TTLs are transferred as absolute unix timestamps. |
 | UTF-8 key names | redis-py decodes notification channels as UTF-8. |
-| Python ≥ 3.14, [uv](https://docs.astral.sh/uv/) | Runtime and packaging. |
+| Python ≥ 3.12, [uv](https://docs.astral.sh/uv/) | Runtime and packaging. |
 
 ## Installation
+
+For a step-by-step setup on Debian/Ubuntu or RHEL-family servers, including
+Redis, users, systemd and verification, see [INSTALL.md](INSTALL.md).
 
 ```bash
 # as a tool, puts `redis-pmr` on the PATH
@@ -391,7 +394,8 @@ Options:
 ## Deployment
 
 Run one instance per Redis host, for example with systemd
-(`/etc/systemd/system/redis-pmr.service`):
+(`/etc/systemd/system/redis-pmr.service`). [INSTALL.md](INSTALL.md) walks
+through the complete setup:
 
 ```ini
 [Unit]
