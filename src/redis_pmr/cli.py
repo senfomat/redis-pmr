@@ -14,14 +14,38 @@ from redis_pmr.config import LogLevel, Settings, load_settings
 from redis_pmr.preflight import PreflightError
 
 
-async def _serve(settings: Settings) -> None:
+async def _main(settings: Settings, *, check: bool) -> int:
+    if check:
+        results = await run_check(settings)
+
+        for result in results:
+            mark = (
+                click.style("OK  ", fg="green")
+                if result.ok
+                else click.style("FAIL", fg="red")
+            )
+            click.echo(f"{mark} {result.name:<20} {result.message}")
+
+        return 0 if all(result.ok for result in results) else 1
+
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
-    await Replicator(settings).run(stop)
+    try:
+        await Replicator(settings).run(stop)
+    except ExceptionGroup as group:
+        preflight, rest = group.split(PreflightError)
+
+        if preflight is None or rest is not None:
+            raise
+
+        message = str(_first_leaf(preflight))
+        raise click.ClickException(message) from group
+
+    return 0
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -65,29 +89,7 @@ def main(*, config_path: Path, node: str | None, log_level: str, check: bool) ->
         message = f"invalid configuration:\n{error}"
         raise click.ClickException(message) from error
 
-    if check:
-        results = asyncio.run(run_check(settings))
-
-        for result in results:
-            mark = (
-                click.style("OK  ", fg="green")
-                if result.ok
-                else click.style("FAIL", fg="red")
-            )
-            click.echo(f"{mark} {result.name:<20} {result.message}")
-
-        sys.exit(0 if all(result.ok for result in results) else 1)
-
-    try:
-        asyncio.run(_serve(settings))
-    except ExceptionGroup as group:
-        preflight, rest = group.split(PreflightError)
-
-        if preflight is None or rest is not None:
-            raise
-
-        message = str(_first_leaf(preflight))
-        raise click.ClickException(message) from group
+    sys.exit(asyncio.run(_main(settings, check=check)))
 
 
 def _first_leaf(group: BaseExceptionGroup) -> BaseException:
