@@ -21,6 +21,7 @@ from redis_pmr.config import (
     url_has_credentials,
 )
 from redis_pmr.events import EventAction, classify
+from redis_pmr.fetcher import Mutation
 from redis_pmr.identity import LocalIdentity, remote_nodes
 from redis_pmr.preflight import (
     PreflightError,
@@ -32,6 +33,7 @@ from redis_pmr.preflight import (
     is_same_server,
     missing_notify_flags,
 )
+from redis_pmr.target import TargetReplicator, TargetState
 
 
 CONFIG = """
@@ -179,6 +181,41 @@ def test_backoff_grows_and_resets() -> None:
     assert delays[-1] >= 2.0
     backoff.reset()
     assert backoff.next_delay() <= 1.0
+
+
+async def test_overflow_reconcile_while_connected(tmp_path: Path) -> None:
+    path = tmp_path / "pmr.toml"
+    path.write_text(
+        CONFIG.replace('["test:*"]', '["test:*"]\nmax_pending_per_target = 2')
+    )
+    settings = load_settings(path)
+    requested: list[str] = []
+    reconciled = asyncio.Event()
+
+    def request(name: str) -> None:
+        requested.append(name)
+        reconciled.set()
+
+    target = TargetReplicator(settings.nodes[1], settings, LocalIdentity(), request)
+    target.state = TargetState.ACTIVE
+
+    for key in ("test:1", "test:2", "test:3"):
+        target.submit(Mutation(key, b"x"))
+
+    assert target.dropped == 1
+
+    async def apply(_client: object, _mutations: list[Mutation]) -> None:
+        await asyncio.sleep(0)
+
+    target._apply = apply  # type: ignore[method-assign]  # ruff: ignore[private-member-access]
+    task = asyncio.create_task(target._replicate(None))  # type: ignore[arg-type]  # ruff: ignore[private-member-access]
+
+    async with asyncio.timeout(1):
+        await reconciled.wait()
+
+    task.cancel()
+    assert requested == ["b"]
+    assert target.pending == 0
 
 
 def test_load_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

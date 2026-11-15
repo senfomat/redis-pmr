@@ -161,6 +161,12 @@ class TargetReplicator:
             finally:
                 self._in_flight = 0
 
+            # Mutations were dropped while connected: the target is caught up
+            # now, so a reconcile can restore the lost keys.
+            if self._needs_reconcile and not len(self._buffer):
+                self._needs_reconcile = False
+                self._request_reconcile(self.name)
+
     async def _apply(self, client: Redis, mutations: list[Mutation]) -> None:
         async with client.pipeline(transaction=False) as pipe:
             for mutation in mutations:
