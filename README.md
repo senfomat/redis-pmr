@@ -81,12 +81,13 @@ host A
    happened, and it does not have to. Repeated events for the same key are
    merged while the key waits.
 3. **Snapshot.** In batches, the current state of each dirty key is read
-   atomically (`MULTI` / `DUMP` / `PEXPIRETIME` / `EXEC`).
+   atomically (`MULTI` / `DUMP` / `PEXPIRETIME` / `GETDEL <echo marker>` /
+   `EXEC`).
 4. **Fan out.** Each snapshot goes to the buffer of every target node. Newer
    snapshots replace older pending ones for the same key.
 5. **Apply.** Every target task writes its batch in a pipeline:
    `RESTORE key <expire_at_ms> <payload> REPLACE ABSTTL`, or `DEL key` when the
-   key no longer exists locally.
+   key no longer exists locally (see [Echo suppression](#echo-suppression)).
 
 Because the *current state* is replicated rather than the individual
 operation, replication is idempotent: a deletion and a modification are
@@ -100,6 +101,24 @@ handled the same way, and a SCAN-based reconcile reuses exactly the same path.
 | `expired`, `evicted` | ignored. Every node expires keys itself (the absolute TTL was replicated); eviction is a local decision. |
 | `new`, `overwritten`, `type_changed`, `keymiss` | ignored. Meta events that accompany a real modification. |
 | everything else (`set`, `del`, `expire`, `persist`, `rename_from`/`rename_to`, `move_from`/`move_to`, `copy_to`, `hset`, `hexpired`, `lpush`, `zadd`, `xadd`, …) | key is marked dirty and its current state is copied (or deleted). |
+
+### Echo suppression
+
+Unlike `RESTORE`, a `DEL` written by the replicator raises an ordinary `del`
+event on the target. Replicated back, it would cost N² deletes and could
+delete a value the origin recreated in the meantime. So a target deletes with
+
+```
+SET pmr:echo:<key> 1 PX <echo_marker_ttl>
+DEL <key>
+```
+
+and the target's own `redis-pmr` consumes that marker (`GETDEL`) in its
+snapshot: key missing *and* marker present means "deleted by a peer", and
+nothing is sent back (counted as `echoes` in the stats). Every snapshot
+consumes the marker and every `RESTORE` removes it, so a stale marker never
+swallows a later, genuine delete. Marker keys must not match any pattern; the
+configuration is rejected otherwise.
 
 ### Self detection
 
@@ -221,15 +240,18 @@ sets of permissions:
 
 | Purpose | Commands |
 |---|---|
-| Source | `info`, `ping`, `psubscribe`, `punsubscribe`, `dump`, `pexpiretime`, `scan`, `multi`, `exec`, `config\|get`, and `config\|set` (only with `manage_notify_config = true`) |
-| Target | `info`, `ping`, `restore`, `del` |
+| Source | `info`, `ping`, `psubscribe`, `punsubscribe`, `dump`, `pexpiretime`, `getdel`, `scan`, `multi`, `exec`, `config\|get`, and `config\|set` (only with `manage_notify_config = true`) |
+| Target | `info`, `ping`, `restore`, `del`, `set` |
 | Connection setup | `client\|setname`, `client\|setinfo` |
 
+Besides the replicated patterns, the user needs key access to the echo
+markers (`~pmr:echo:*`, or your `echo_marker_prefix`).
+
 ```
-ACL SETUSER pmr on >CHANGE-ME resetkeys ~session:* ~lock:* \
+ACL SETUSER pmr on >CHANGE-ME resetkeys ~session:* ~lock:* ~pmr:echo:* \
   resetchannels &__keyspace@0__:session:* &__keyspace@0__:lock:* \
-  -@all +info +ping +psubscribe +punsubscribe +dump +pexpiretime +scan \
-  +multi +exec +restore +del +config|get +config|set \
+  -@all +info +ping +psubscribe +punsubscribe +dump +pexpiretime +getdel \
+  +scan +multi +exec +restore +del +set +config|get +config|set \
   +client|setname +client|setinfo
 ```
 
@@ -324,13 +346,15 @@ Default credentials for all servers (see [Authentication](#authentication)).
 |---|---|---|---|
 | `patterns` | list of strings | **required** | Glob patterns (Redis `PSUBSCRIBE`/`SCAN MATCH` syntax) of keys to replicate. |
 | `batch_size` | int | `256` | Keys per `DUMP` and per `RESTORE` pipeline. |
-| `max_pending_per_target` | int | `100000` | Distinct keys buffered per target. When it is full, new keys are dropped and a reconcile for that target is scheduled once it is connected again. |
+| `max_pending_per_target` | int | `100000` | Distinct keys buffered per target. When it is full, new keys are dropped and a reconcile for that target is scheduled once it has caught up (or reconnected). |
 | `reconcile_on_start` | bool | `false` | Push all keys matching the patterns once after the first connect. |
 | `reconcile_on_reconnect` | bool | `true` | Push all keys matching the patterns after the local Pub/Sub connection was re-established, because events during the gap are lost. |
 | `scan_count` | int | `1000` | `COUNT` hint for `SCAN` during reconciles. |
 | `shutdown_drain_timeout` | float | `5.0` | Seconds to wait for pending mutations on SIGTERM/SIGINT. |
 | `stats_interval` | float | `60.0` | Seconds between stats log lines; `0` disables them. |
 | `min_server_version` | string | `"7.0"` | Minimum Redis version accepted on all nodes. |
+| `echo_marker_prefix` | string | `"pmr:echo:"` | Prefix of the [echo markers](#echo-suppression). Must not overlap with any pattern. |
+| `echo_marker_ttl` | float | `10.0` | Seconds an unconsumed echo marker lives. Must exceed the time between a `DEL` on a target and its snapshot there. |
 
 ### `[backoff]`
 
@@ -439,7 +463,7 @@ The process doesn't need to start after Redis: it waits and reconnects. On
 Every `stats_interval` seconds, one line is logged:
 
 ```
-stats: events=1532 reconciled=0 dirty=0 snapshots=1204 node-a=self/pending:0/applied:0/errors:0/dropped:0 node-b=active/pending:0/applied:1204/errors:0/dropped:0
+stats: events=1532 reconciled=0 dirty=0 snapshots=1204 echoes=17 node-a=self/pending:0/applied:0/errors:0/dropped:0 node-b=active/pending:0/applied:1204/errors:0/dropped:0
 ```
 
 | Field | Meaning |
@@ -448,6 +472,7 @@ stats: events=1532 reconciled=0 dirty=0 snapshots=1204 node-a=self/pending:0/app
 | `reconciled` | Keys queued by SCAN reconciles. |
 | `dirty` | Keys waiting to be snapshotted. |
 | `snapshots` | Key states read from the local server. |
+| `echoes` | Deletes written by a peer and therefore not sent back. |
 | `<node>=<state>` | `connecting`, `active`, `incompatible` (version/RDB check failed, retried every `backoff.maximum` seconds) or `self`. |
 | `pending` | Mutations buffered for this node. Grows while the node is unreachable. |
 | `applied` / `errors` | Successful `RESTORE`/`DEL` commands and per-key failures. |
@@ -494,9 +519,6 @@ wins*. It is not a consensus system.
   and no timestamps. Design your key space so that a key is usually written by
   one node at a time (e.g. sessions pinned to a node, locks with unique
   owners).
-- **Echo-delete race.** A deletes k → B deletes k → B reports `del` → B sends
-  `DEL k` back to A. If A recreated k within that round trip (milliseconds),
-  the new value is deleted again.
 - **No multi-key atomicity.** `MULTI`/`EXEC` blocks and Lua scripts are
   replicated key by key.
 - **`RESTORE` issued by applications is not replicated.** It is

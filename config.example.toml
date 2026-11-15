@@ -45,7 +45,7 @@ patterns = ["session:*", "lock:*"]
 # Keys per DUMP/RESTORE pipeline.
 batch_size = 256
 # Distinct keys buffered per unreachable target before mutations are dropped
-# (a reconcile for that target runs once it is reachable again).
+# (a reconcile for that target runs once it has caught up).
 max_pending_per_target = 100_000
 # Push all keys matching the patterns once after startup.
 reconcile_on_start = false
@@ -59,6 +59,11 @@ shutdown_drain_timeout = 5.0
 stats_interval = 60.0
 # DUMP/RESTORE ABSTTL and PEXPIRETIME require Redis 7.0.
 min_server_version = "7.0"
+# A target marks its own DELs with "<prefix><key>" (lifetime in seconds), so
+# the target's redis-pmr does not send them back. The prefix must not overlap
+# with any pattern, and the ACL user needs access to it (~pmr:echo:*).
+echo_marker_prefix = "pmr:echo:"
+echo_marker_ttl = 10.0
 
 [backoff]
 initial = 0.5

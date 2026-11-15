@@ -122,7 +122,7 @@ other hosts. Write it to `/etc/redis/users.acl`, adjusting the key patterns
 
 ```
 user default on >ADMIN-PASSWORD ~* &* +@all
-user pmr on >PMR-PASSWORD resetkeys ~session:* ~lock:* resetchannels &__keyspace@0__:session:* &__keyspace@0__:lock:* -@all +info +ping +psubscribe +punsubscribe +dump +pexpiretime +scan +multi +exec +restore +del +config|get +config|set +client|setname +client|setinfo
+user pmr on >PMR-PASSWORD resetkeys ~session:* ~lock:* ~pmr:echo:* resetchannels &__keyspace@0__:session:* &__keyspace@0__:lock:* -@all +info +ping +psubscribe +punsubscribe +dump +pexpiretime +getdel +scan +multi +exec +restore +del +set +config|get +config|set +client|setname +client|setinfo
 ```
 
 - Each user goes on **one line**.
