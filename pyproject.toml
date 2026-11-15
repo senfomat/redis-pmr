@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Redis Poor-mans-replication"
 readme = "README.md"
 authors = [
-    { name = "Christian Frömmel", email = "c.froemmel@systemconcept.de" }
+    { name = "Christian Frömmel", email = "c.froemmel@aptaro.de" }
 ]
 requires-python = ">=3.12"
 dependencies = [
