@@ -174,7 +174,14 @@ class SourceListener:
             async for key in self._data_client.scan_iter(
                 match=pattern, count=self._settings.replication.scan_count
             ):
-                self._dirty.put(key.decode("utf-8", errors="replace"), targets)
+                try:
+                    name = key.decode("utf-8")
+                except UnicodeDecodeError:
+                    # A replacement character would replicate a different key.
+                    logger.warning("reconcile skips non-UTF-8 key %r", key)
+                    continue
+
+                self._dirty.put(name, targets)
                 count += 1
 
         return count

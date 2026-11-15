@@ -183,6 +183,17 @@ async def test_local_restart_restores_notify_flags(
         await client_a.aclose()
 
 
+async def test_reconcile_skips_non_utf8_keys(
+    mesh: Mesh, clients: dict[str, Redis]
+) -> None:
+    await clients["a"].set(b"test:\xff", "binary")
+    await clients["a"].set("test:text", "ok")
+    await eventually(get_probe(clients["b"], "test:text"), b"ok")
+
+    assert await mesh["a"].source.reconcile(None) == 1
+    assert await clients["b"].get("test:�") is None
+
+
 async def test_reconcile_after_pubsub_drop(
     mesh: Mesh, clients: dict[str, Redis]
 ) -> None:
