@@ -15,12 +15,7 @@ from redis_pmr.clients import create_client, redact_url
 from redis_pmr.config import NodeConfig, Settings
 from redis_pmr.fetcher import Mutation
 from redis_pmr.identity import LocalIdentity
-from redis_pmr.preflight import (
-    PreflightError,
-    check_min_version,
-    fetch_server_info,
-    is_rdb_compatible,
-)
+from redis_pmr.preflight import PreflightError, check_target, fetch_server_info
 
 
 logger = logging.getLogger(__name__)
@@ -137,15 +132,7 @@ class TargetReplicator:
             logger.info("[%s] is the local server, not replicating to it", self.name)
             return
 
-        check_min_version(info, self._settings.replication.min_version)
-
-        if not is_rdb_compatible(local, info):
-            msg = (
-                f"Redis {info.version_str} cannot RESTORE payloads of the local "
-                f"Redis {local.version_str}; upgrade this node"
-            )
-            raise PreflightError(msg)
-
+        check_target(local, info, self._settings.replication.min_version)
         self.state = TargetState.ACTIVE
         self._backoff.reset()
         logger.info(

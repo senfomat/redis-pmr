@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
-from redis_pmr.config import parse_version
+from redis_pmr.config import format_version, parse_version
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class ServerInfo:
     @property
     def version_str(self) -> str:
         """The version as dotted string."""
-        return ".".join(map(str, self.version))
+        return format_version(self.version)
 
 
 def _text(value: object) -> str:
@@ -63,9 +63,19 @@ def check_min_version(info: ServerInfo, minimum: tuple[int, ...]) -> None:
     if info.version < minimum:
         msg = (
             f"Redis {info.version_str} is too old, at least "
-            f"{'.'.join(map(str, minimum))} is required"
+            f"{format_version(minimum)} is required"
         )
         raise PreflightError(msg)
+
+
+def is_same_server(first: ServerInfo, second: ServerInfo) -> bool:
+    """Check whether two infos describe the same server process.
+
+    Returns:
+        True if both have the same (known) run id.
+
+    """
+    return first.run_id is not None and first.run_id == second.run_id
 
 
 def is_rdb_compatible(source: ServerInfo, target: ServerInfo) -> bool:
@@ -79,6 +89,30 @@ def is_rdb_compatible(source: ServerInfo, target: ServerInfo) -> bool:
 
     """
     return target.version[:2] >= source.version[:2]
+
+
+def check_target(
+    local: ServerInfo | None, target: ServerInfo, minimum: tuple[int, ...]
+) -> None:
+    """Verify that *target* can receive the payloads of *local*.
+
+    Args:
+        local: The local server, None if unknown (only the version is checked).
+        target: The remote server.
+        minimum: The minimum server version.
+
+    Raises:
+        PreflightError: If the target is too old.
+
+    """
+    check_min_version(target, minimum)
+
+    if local is not None and not is_rdb_compatible(local, target):
+        msg = (
+            f"Redis {target.version_str} cannot RESTORE payloads of the local "
+            f"Redis {local.version_str}; upgrade this node"
+        )
+        raise PreflightError(msg)
 
 
 def expand_notify_flags(flags: str) -> set[str]:
@@ -107,6 +141,25 @@ def missing_notify_flags(current: str) -> str:
     return "".join(flag for flag in REQUIRED_NOTIFY_FLAGS if flag not in present)
 
 
+async def read_notify_flags(client: Redis) -> str:
+    """Read the current notify-keyspace-events value.
+
+    Returns:
+        The configured flags (possibly empty).
+
+    Raises:
+        PreflightError: If the value cannot be read (e.g. missing ACL rights).
+
+    """
+    try:
+        config = await client.config_get("notify-keyspace-events")
+    except ResponseError as error:
+        msg = f"cannot read notify-keyspace-events: {error}"
+        raise PreflightError(msg) from error
+
+    return _text(next(iter(config.values()), b""))
+
+
 async def ensure_notify_flags(client: Redis, *, manage: bool) -> str:
     """Make sure keyspace notifications needed for replication are enabled.
 
@@ -122,13 +175,7 @@ async def ensure_notify_flags(client: Redis, *, manage: bool) -> str:
         PreflightError: If flags are missing and cannot or must not be set.
 
     """
-    try:
-        config = await client.config_get("notify-keyspace-events")
-    except ResponseError as error:
-        msg = f"cannot read notify-keyspace-events: {error}"
-        raise PreflightError(msg) from error
-
-    current = _text(next(iter(config.values()), b""))
+    current = await read_notify_flags(client)
 
     if not (missing := missing_notify_flags(current)):
         return current

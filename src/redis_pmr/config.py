@@ -48,6 +48,16 @@ def parse_version(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.strip().split("."))
 
 
+def format_version(version: tuple[int, ...]) -> str:
+    """Format a version tuple as dotted string, the inverse of :func:`parse_version`.
+
+    Returns:
+        The version like ``8.10.2``.
+
+    """
+    return ".".join(map(str, version))
+
+
 def _validate_redis_url(url: str) -> str:
     if not url.startswith(REDIS_URL_SCHEMES):
         msg = f"URL must start with one of {', '.join(REDIS_URL_SCHEMES)}"

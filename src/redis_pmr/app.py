@@ -16,9 +16,11 @@ from redis_pmr.preflight import (
     PreflightError,
     ServerInfo,
     check_min_version,
+    check_target,
     fetch_server_info,
-    is_rdb_compatible,
+    is_same_server,
     missing_notify_flags,
+    read_notify_flags,
 )
 from redis_pmr.source import SourceListener
 from redis_pmr.target import TargetReplicator, TargetState
@@ -166,14 +168,12 @@ async def _check_local(settings: Settings) -> tuple[CheckResult, ServerInfo | No
     try:
         info = await fetch_server_info(client)
         check_min_version(info, settings.replication.min_version)
-        config = await client.config_get("notify-keyspace-events")
+        current = await read_notify_flags(client)
     except (RedisError, OSError, PreflightError) as error:
         return CheckResult("local", ok=False, message=str(error)), None
     finally:
         await client.aclose()
 
-    raw = next(iter(config.values()), b"")
-    current = raw.decode() if isinstance(raw, bytes) else str(raw)
     message = f"Redis {info.version_str}, notify-keyspace-events '{current}'"
 
     if missing := missing_notify_flags(current):
@@ -202,17 +202,13 @@ async def _check_node(
     finally:
         await client.aclose()
 
-    if local is not None and info.run_id is not None and info.run_id == local.run_id:
+    if local is not None and is_same_server(local, info):
         return CheckResult(name, ok=True, message="self (detected by run_id), skipped")
 
     try:
-        check_min_version(info, settings.replication.min_version)
+        check_target(local, info, settings.replication.min_version)
     except PreflightError as error:
         return CheckResult(name, ok=False, message=str(error))
-
-    if local is not None and not is_rdb_compatible(local, info):
-        message = f"Redis {info.version_str} is older than local {local.version_str}"
-        return CheckResult(name, ok=False, message=message)
 
     return CheckResult(name, ok=True, message=f"Redis {info.version_str}")
 

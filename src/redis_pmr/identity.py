@@ -3,7 +3,7 @@
 import asyncio
 
 from redis_pmr.config import NodeConfig
-from redis_pmr.preflight import ServerInfo
+from redis_pmr.preflight import ServerInfo, is_same_server
 
 
 class LocalIdentity:
@@ -47,11 +47,7 @@ class LocalIdentity:
             True if the run ids match.
 
         """
-        return (
-            self._info is not None
-            and info.run_id is not None
-            and info.run_id == self._info.run_id
-        )
+        return self._info is not None and is_same_server(self._info, info)
 
 
 def remote_nodes(nodes: list[NodeConfig], self_name: str | None) -> list[NodeConfig]:

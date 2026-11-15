@@ -15,6 +15,7 @@ from redis_pmr.config import (
     NodeConfig,
     ReplicationConfig,
     Settings,
+    format_version,
     load_settings,
     parse_version,
     url_has_credentials,
@@ -25,8 +26,10 @@ from redis_pmr.preflight import (
     PreflightError,
     ServerInfo,
     check_min_version,
+    check_target,
     expand_notify_flags,
     is_rdb_compatible,
+    is_same_server,
     missing_notify_flags,
 )
 
@@ -95,6 +98,23 @@ def test_versions() -> None:
     assert is_rdb_compatible(old, new)
     assert not is_rdb_compatible(new, old)
     assert is_rdb_compatible(ServerInfo((8, 10, 0), None), ServerInfo((8, 10, 9), None))
+    assert format_version((8, 10, 2)) == "8.10.2"
+
+
+def test_check_target() -> None:
+    old = ServerInfo((7, 2, 0), "x")
+    new = ServerInfo((8, 0, 0), "y")
+    check_target(old, new, (7, 0))
+    check_target(None, old, (7, 0))
+
+    with pytest.raises(PreflightError, match="cannot RESTORE"):
+        check_target(new, old, (7, 0))
+
+    with pytest.raises(PreflightError, match="too old"):
+        check_target(None, old, (8, 0))
+
+    assert is_same_server(old, ServerInfo((7, 2, 0), "x"))
+    assert not is_same_server(ServerInfo((8, 0), None), ServerInfo((8, 0), None))
 
 
 def test_identity() -> None:
