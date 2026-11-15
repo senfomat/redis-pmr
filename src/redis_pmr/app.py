@@ -56,7 +56,7 @@ class Replicator:
             self.dirty,
             self._fan_out,
             ExponentialBackoff(settings.backoff),
-            settings.replication.batch_size,
+            settings.replication,
         )
 
     def _fan_out(self, mutation: Mutation, targets: TargetSet) -> None:
@@ -144,7 +144,8 @@ class Replicator:
         )
         return (
             f"events={self.source.events} reconciled={self.source.reconciled} "
-            f"dirty={len(self.dirty)} snapshots={self.fetcher.snapshots} {targets}"
+            f"dirty={len(self.dirty)} snapshots={self.fetcher.snapshots} "
+            f"echoes={self.fetcher.echoes} {targets}"
         )
 
     async def _log_stats(self) -> None:

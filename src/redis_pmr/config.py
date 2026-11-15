@@ -1,5 +1,6 @@
 """Configuration models, loaded from a TOML file with environment overrides."""
 
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Self, override
@@ -140,12 +141,47 @@ class ReplicationConfig(_Model):
     shutdown_drain_timeout: NonNegativeFloat = 5.0
     stats_interval: NonNegativeFloat = 60.0
     min_server_version: str = "7.0"
+    echo_marker_prefix: str = Field(default="pmr:echo:", min_length=1)
+    echo_marker_ttl: PositiveFloat = 10.0
 
     @field_validator("min_server_version")
     @classmethod
     def _check_version(cls, value: str) -> str:
         parse_version(value)
         return value
+
+    @model_validator(mode="after")
+    def _check_echo_marker_prefix(self) -> Self:
+        # Markers must never be replicated themselves. Conservative check: the
+        # literal part of a pattern (before the first glob character) must not
+        # be compatible with the marker prefix.
+        prefix = self.echo_marker_prefix
+
+        for pattern in self.patterns:
+            literal = re.split(r"[*?\[\\]", pattern, maxsplit=1)[0]
+
+            if literal.startswith(prefix) or prefix.startswith(literal):
+                msg = (
+                    f"echo_marker_prefix '{prefix}' may overlap with pattern "
+                    f"'{pattern}'; choose a prefix outside all patterns"
+                )
+                raise ValueError(msg)
+
+        return self
+
+    def echo_marker(self, key: str) -> str:
+        """Name the marker key that flags a DEL of *key* as written by redis-pmr.
+
+        Returns:
+            The marker key.
+
+        """
+        return f"{self.echo_marker_prefix}{key}"
+
+    @property
+    def echo_marker_ttl_ms(self) -> int:
+        """The marker lifetime in milliseconds."""
+        return max(1, int(self.echo_marker_ttl * 1000))
 
     @property
     def min_version(self) -> tuple[int, ...]:

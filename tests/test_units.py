@@ -251,6 +251,17 @@ def test_settings_validation(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="URL must start"):
         load_settings(path)
 
+    for patterns in ('["*"]', '["pmr:*"]', '["pmr:echo:x:*"]'):
+        path.write_text(CONFIG.replace('["test:*"]', patterns))
+
+        with pytest.raises(ValidationError, match="echo_marker_prefix"):
+            load_settings(path)
+
+    path.write_text(CONFIG.replace('["test:*"]', '["session:*", "lock:?"]'))
+    settings = load_settings(path)
+    assert settings.replication.echo_marker("session:1") == "pmr:echo:session:1"
+    assert settings.replication.echo_marker_ttl_ms == 10_000
+
 
 @pytest.mark.parametrize(
     ("url", "db"),

@@ -168,11 +168,21 @@ class TargetReplicator:
                 self._request_reconcile(self.name)
 
     async def _apply(self, client: Redis, mutations: list[Mutation]) -> None:
+        replication = self._settings.replication
+
+        # Two commands per mutation. A DEL raises a "del" event on the target,
+        # which its own redis-pmr would replicate back (possibly deleting a
+        # newer value); the marker set right before tells it to skip that echo.
+        # RESTORE raises no replicated event, so it drops a stale marker instead.
         async with client.pipeline(transaction=False) as pipe:
             for mutation in mutations:
+                marker = replication.echo_marker(mutation.key)
+
                 if mutation.payload is None:
+                    pipe.set(marker, b"1", px=replication.echo_marker_ttl_ms)
                     pipe.delete(mutation.key)
                 else:
+                    pipe.delete(marker)
                     pipe.restore(
                         mutation.key,
                         mutation.expire_at_ms,
@@ -190,14 +200,16 @@ class TargetReplicator:
             ):
                 raise result
 
-        for mutation, result in zip(mutations, results, strict=True):
-            if isinstance(result, Exception):
+        for index, mutation in enumerate(mutations):
+            pair = results[2 * index : 2 * index + 2]
+
+            if error := next((r for r in pair if isinstance(r, Exception)), None):
                 self.errors += 1
                 logger.error(
                     "[%s] replicating key '%s' failed: %s",
                     self.name,
                     mutation.key,
-                    result,
+                    error,
                 )
             else:
                 self.applied += 1

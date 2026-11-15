@@ -9,6 +9,7 @@ from redis.exceptions import RedisError
 
 from redis_pmr.backoff import ExponentialBackoff
 from redis_pmr.buffer import CoalescingBuffer, TargetSet
+from redis_pmr.config import ReplicationConfig
 
 
 logger = logging.getLogger(__name__)
@@ -50,43 +51,59 @@ class SnapshotFetcher:
         dirty: CoalescingBuffer[str, TargetSet],
         fan_out: FanOut,
         backoff: ExponentialBackoff,
-        batch_size: int,
+        replication: ReplicationConfig,
     ) -> None:
-        """Create a fetcher reading from *client*."""
+        """Create a fetcher reading from *client*.
+
+        Args:
+            client: Client of the local server.
+            dirty: The keys to snapshot.
+            fan_out: Receives every mutation with its targets.
+            backoff: Delay between failed reads.
+            replication: Provides the batch size and the echo marker names.
+
+        """
         self._client = client
         self._dirty = dirty
         self._fan_out = fan_out
         self._backoff = backoff
-        self._batch_size = batch_size
+        self._batch_size = replication.batch_size
+        self._echo_marker = replication.echo_marker
         self._busy = False
         self.snapshots = 0
+        self.echoes = 0
 
     @property
     def idle(self) -> bool:
         """True if no dirty keys are pending or in flight."""
         return not self._busy and not len(self._dirty)
 
-    async def snapshot(self, keys: list[str]) -> list[Mutation]:
+    async def snapshot(self, keys: list[str]) -> list[Mutation | None]:
         """Read DUMP payload and absolute expiry of *keys* atomically.
 
+        Every snapshot also consumes the key's echo marker, so a stale marker
+        can never suppress a later, genuine deletion.
+
         Returns:
-            One mutation per key, in the same order.
+            One mutation per key, in the same order; None for a deletion that
+            another redis-pmr wrote (replicating it back would be an echo).
 
         """
         async with self._client.pipeline(transaction=True) as pipe:
             for key in keys:
                 pipe.dump(key)
                 pipe.pexpiretime(key)
+                pipe.getdel(self._echo_marker(key))
 
             results = await pipe.execute()
 
-        mutations: list[Mutation] = []
+        mutations: list[Mutation | None] = []
 
         for index, key in enumerate(keys):
-            payload, expire_at = results[2 * index], results[2 * index + 1]
+            payload, expire_at, marker = results[3 * index : 3 * index + 3]
 
             if payload is None or expire_at == KEY_MISSING:
-                mutations.append(Mutation(key, None))
+                mutations.append(None if marker is not None else Mutation(key, None))
             else:
                 expiry = 0 if expire_at == NO_EXPIRY else int(expire_at)
                 mutations.append(Mutation(key, payload, expiry))
@@ -98,7 +115,7 @@ class SnapshotFetcher:
         while True:
             batch = await self._dirty.drain(self._batch_size)
             self._busy = True
-            mutations: list[Mutation] | None = None
+            mutations: list[Mutation | None] | None = None
 
             try:
                 mutations = await self.snapshot([key for key, _ in batch])
@@ -121,4 +138,7 @@ class SnapshotFetcher:
             self.snapshots += len(mutations)
 
             for (_, targets), mutation in zip(batch, mutations, strict=True):
-                self._fan_out(mutation, targets)
+                if mutation is None:
+                    self.echoes += 1
+                else:
+                    self._fan_out(mutation, targets)

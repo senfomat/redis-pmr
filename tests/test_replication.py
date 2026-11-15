@@ -135,6 +135,40 @@ async def test_no_ping_pong(mesh: Mesh, clients: dict[str, Redis]) -> None:
     assert {name: r.source.events for name, r in mesh.items()} == events
 
 
+async def test_delete_is_not_echoed(mesh: Mesh, clients: dict[str, Redis]) -> None:
+    await clients["a"].set("test:echo", "1")
+
+    for name in ("b", "c"):
+        await eventually(get_probe(clients[name], "test:echo"), b"1")
+
+    applied = {name: [t.applied for t in r.targets] for name, r in mesh.items()}
+    await clients["a"].delete("test:echo")
+
+    async def echoes() -> dict[str, int]:
+        return {name: r.fetcher.echoes for name, r in mesh.items()}
+
+    # b and c see the "del" written by a, recognize it and send nothing back.
+    await eventually(echoes, {"a": 0, "b": 1, "c": 1})
+    await asyncio.sleep(0.3)
+    assert {
+        name: [t.applied for t in r.targets] for name, r in mesh.items() if name != "a"
+    } == {name: applied[name] for name in ("b", "c")}
+    assert await clients["b"].keys("pmr:echo:*") == []
+
+    # A recreate right after a delete survives everywhere.
+    await clients["a"].set("test:echo", "2")
+
+    for name in ("b", "c"):
+        await eventually(get_probe(clients[name], "test:echo"), b"2")
+
+    await clients["a"].delete("test:echo")
+    await clients["a"].set("test:echo", "3")
+    await asyncio.sleep(0.3)
+
+    for name in ("a", "b", "c"):
+        await eventually(get_probe(clients[name], "test:echo"), b"3")
+
+
 @pytest.mark.usefixtures("mesh")
 async def test_target_outage_does_not_block_others(
     servers: list[RedisServer], clients: dict[str, Redis]
