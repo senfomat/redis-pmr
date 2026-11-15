@@ -4,6 +4,23 @@ import asyncio
 from collections.abc import Callable, Iterable
 
 
+# Targets a dirty key must be replicated to; None means "all targets".
+type TargetSet = frozenset[str] | None
+
+
+def merge_targets(old: TargetSet, new: TargetSet) -> TargetSet:
+    """Combine two target sets, where None (all targets) dominates.
+
+    Returns:
+        The union of both sets, or None if either covers all targets.
+
+    """
+    if old is None or new is None:
+        return None
+
+    return old | new
+
+
 class CoalescingBuffer[K, V]:
     """Insertion-ordered key/value buffer where newer values replace older ones.
 

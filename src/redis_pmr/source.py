@@ -8,11 +8,10 @@ from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
 from redis.exceptions import RedisError
 
 from redis_pmr.backoff import ExponentialBackoff
-from redis_pmr.buffer import CoalescingBuffer
+from redis_pmr.buffer import CoalescingBuffer, TargetSet, merge_targets
 from redis_pmr.clients import client_db, create_client, redact_url
 from redis_pmr.config import Settings
 from redis_pmr.events import EventAction, classify
-from redis_pmr.fetcher import TargetSet, merge_targets
 from redis_pmr.identity import LocalIdentity
 from redis_pmr.preflight import (
     PreflightError,

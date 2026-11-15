@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from redis.exceptions import RedisError
 
 from redis_pmr.backoff import ExponentialBackoff
-from redis_pmr.buffer import CoalescingBuffer
+from redis_pmr.buffer import CoalescingBuffer, TargetSet, merge_targets
 from redis_pmr.clients import create_client, redact_url
 from redis_pmr.config import NodeConfig, Settings
-from redis_pmr.fetcher import Mutation, SnapshotFetcher, TargetSet, merge_targets
+from redis_pmr.fetcher import Mutation, SnapshotFetcher
 from redis_pmr.identity import LocalIdentity, remote_nodes
 from redis_pmr.preflight import (
     PreflightError,

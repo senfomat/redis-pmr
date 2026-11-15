@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from redis_pmr.backoff import ExponentialBackoff
-from redis_pmr.buffer import CoalescingBuffer
+from redis_pmr.buffer import CoalescingBuffer, merge_targets
 from redis_pmr.clients import client_db, create_client, redact_url
 from redis_pmr.config import (
     BackoffConfig,
@@ -20,7 +20,6 @@ from redis_pmr.config import (
     url_has_credentials,
 )
 from redis_pmr.events import EventAction, classify
-from redis_pmr.fetcher import merge_targets
 from redis_pmr.identity import LocalIdentity, remote_nodes
 from redis_pmr.preflight import (
     PreflightError,

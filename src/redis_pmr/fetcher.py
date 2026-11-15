@@ -8,29 +8,13 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from redis_pmr.backoff import ExponentialBackoff
-from redis_pmr.buffer import CoalescingBuffer
+from redis_pmr.buffer import CoalescingBuffer, TargetSet
 
 
 logger = logging.getLogger(__name__)
 
-# None means "all targets".
-type TargetSet = frozenset[str] | None
-
 NO_EXPIRY = -1
 KEY_MISSING = -2
-
-
-def merge_targets(old: TargetSet, new: TargetSet) -> TargetSet:
-    """Combine two target sets, where None (all targets) dominates.
-
-    Returns:
-        The union of both sets, or None if either covers all targets.
-
-    """
-    if old is None or new is None:
-        return None
-
-    return old | new
 
 
 @dataclass(frozen=True, slots=True)
