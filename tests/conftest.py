@@ -3,7 +3,13 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterator,
+)
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -163,7 +169,7 @@ async def target_states(replicator: Replicator) -> dict[str, TargetState]:
 @asynccontextmanager
 async def running_mesh(
     servers: list[RedisServer], settings: Settings
-) -> AsyncIterator[Mesh]:
+) -> AsyncGenerator[Mesh]:
     """Run one replicator per server, all with the identical configuration."""
     stop = asyncio.Event()
     replicators = {
